@@ -33,6 +33,22 @@
 
 > Consistent Gets 改善幅度以 `(97,601 - 368) / 97,601` 計算，約為 99.62%。以上為還原的測試環境中單次 SQL 執行的比對結果。Physical Reads 會受快取狀態影響；Optimizer Cost 為估算成本，不代表實際執行時間或倍數。此紀錄未提供上線後 CPU 降幅或回應時間數據。
 
+## 調校前後執行計畫與統計
+
+### 調校前：Full Table Scan
+
+執行計畫採用 `TABLE ACCESS FULL`；單次 Consistent Gets 為 **97,601**，Physical Reads 為 **94,247**。
+
+![Oracle 調校前：全表掃描與 Autotrace 統計](assets/oracle-autotrace-before.png)
+
+### 調校後：Index Range Scan
+
+建立適當索引後，執行計畫改為 `INDEX RANGE SCAN` 搭配 `TABLE ACCESS BY INDEX ROWID BATCHED`；單次 Consistent Gets 降至 **368**，Physical Reads 為 **0**。
+
+![Oracle 調校後：索引範圍掃描與 Autotrace 統計](assets/oracle-autotrace-after.png)
+
+> 圖片擷取自原始調校紀錄，將同一次執行的執行計畫與統計區塊上下排版，省略查詢條件並遮蔽內部物件名稱及計畫雜湊值。保留原始存取方式與統計數字，未重繪或變更數據。結果為還原測試環境中的單次執行比較。
+
 ## 使用技術
 
 Oracle Database、SQL、AWR、Oracle Enterprise Manager、Autotrace、執行計畫分析、索引設計、統計資訊。
