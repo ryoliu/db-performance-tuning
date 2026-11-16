@@ -1,58 +1,68 @@
-# 專案成就｜Oracle SQL 效能優化
+# Oracle 效能改善｜減少高頻率查詢的資料讀取量
 
-## 履歷摘要
+透過建立合適的索引，在還原的測試環境中，將單次查詢的**邏輯讀取量由 97,601 降至 368，減少約 99.6%**。
 
-- **Oracle SQL 效能優化**：運用 AWR 與 Autotrace，定位高 I/O、高頻率執行的 SQL，分析既有索引與查詢條件後建立適當索引，於還原的測試環境將執行計畫由 Full Table Scan 改為 Index Range Scan 搭配回表存取，單次 Logical I/O（Consistent Gets）由 **97,601 降至 368，減少約 99.6%**。
+## 當時遇到的問題
 
-## 專案背景與原因
+監控發現，資料庫在假日較常出現運算負載偏高的情形。我追查後發現，一段查詢在 15 分鐘內執行了 4,609 次，而且每次都要掃描整張資料表才能找出需要的資料。
 
-監控發現資料庫於假日較常出現 CPU 使用率偏高的情形。透過 AWR 與 Oracle Enterprise Manager（EM）效能資訊追查，發現一段 SQL 在 15 分鐘內執行 4,609 次，且每次執行均採取全表掃描，累積大量 I/O 負載。
+當查詢頻率高、資料持續增加時，這種查找方式會反覆讀取大量資料，累積可觀的資源消耗。
 
-資料表雖已有索引，但既有複合索引的首欄並非此 SQL 的主要篩選欄位，未能有效支援該查詢。隨資料量持續成長，高頻率的全表掃描增加了資料庫的資源消耗。
+## 我如何處理
 
-## 分析與改善措施
+1. **找出重複消耗資源的查詢**：分析效能紀錄，確認問題查詢的執行頻率及資料讀取情況。
+2. **檢查查找方式**：確認資料表雖然已有索引，但索引的欄位順序未能有效支援這段查詢。
+3. **在測試環境驗證**：還原資料庫、更新統計資訊，記錄建立索引前的查詢方式與讀取量。
+4. **建立合適的索引**：針對查詢主要使用的篩選欄位建立索引，讓資料庫能先定位所需資料，再讀取對應內容。
+5. **比對改善結果**：確認資料庫不再掃描整張資料表，並以單次查詢的讀取統計驗證改善效果。
 
-- **定位高負載 SQL**：透過 AWR 與 EM 效能資訊，確認問題 SQL 的執行頻率與資源消耗。
-- **建立驗證環境**：還原資料庫至測試環境，並分析資料表、更新統計資訊，進行索引調校驗證。
-- **確認調校前基準**：使用 `SET AUTOTRACE TRACEONLY`，檢查執行計畫、Consistent Gets 與 Physical Reads，確認原先採用 `TABLE ACCESS FULL`。
-- **建立適當索引**：檢視查詢條件與既有索引欄位順序，針對主要等值篩選欄位建立索引。
-- **驗證調校成效**：再次執行查詢，確認存取路徑改為 `INDEX RANGE SCAN` 搭配 `TABLE ACCESS BY INDEX ROWID BATCHED`，並比對單次執行的 I/O 統計。
+## 改善成果
 
-## 量化成果
+「邏輯讀取量」是資料庫處理查詢時讀取資料區塊的計數，並非資料筆數。這個案例的重點是：完成一次查詢所需的資料讀取工作大幅減少。
 
-| 效能指標 | 建立索引前 | 建立索引後 | 改善結果 |
-| --- | ---: | ---: | --- |
-| Logical I/O（Consistent Gets） | 97,601 | 368 | 減少 97,233，約降低 **99.6%** |
-| Physical Reads | 94,247 | 0 | 本次測試執行未產生實體讀取 |
-| Optimizer Cost | 25,589 | 11 | 最佳化器估算成本明顯下降 |
+| 比較項目 | 改善前 | 改善後 |
+| --- | --- | --- |
+| 資料查找方式 | 掃描整張資料表 | 先透過索引定位，再讀取對應資料 |
+| 單次邏輯讀取量 | 97,601 | **368** |
+| 邏輯讀取量減幅 | — | **約 99.6%** |
 
-| 執行計畫 | 存取方式 |
-| --- | --- |
-| 建立索引前 | `TABLE ACCESS FULL` |
-| 建立索引後 | `INDEX RANGE SCAN` + `TABLE ACCESS BY INDEX ROWID BATCHED` |
+> 以上是還原測試環境中的單次執行比較，未直接換算為上線後的回應時間或整台伺服器 CPU 改善幅度。
 
-> Consistent Gets 改善幅度以 `(97,601 - 368) / 97,601` 計算，約為 99.62%。以上為還原的測試環境中單次 SQL 執行的比對結果。Physical Reads 會受快取狀態影響；Optimizer Cost 為估算成本，不代表實際執行時間或倍數。此紀錄未提供上線後 CPU 降幅或回應時間數據。
+## 前後驗證圖
 
-## 調校前後執行計畫與統計
+圖片是資料庫工具記錄的原始結果。可直接看圖中 `consistent gets` 這一列，比較改善前後的邏輯讀取量。
 
-### 調校前：Full Table Scan
+### 改善前：每次查詢都掃描整張資料表
 
-執行計畫採用 `TABLE ACCESS FULL`；單次 Consistent Gets 為 **97,601**，Physical Reads 為 **94,247**。
+圖中的 `TABLE ACCESS FULL` 代表全表掃描；`consistent gets` 為 **97,601**。
 
-![Oracle 調校前：全表掃描與 Autotrace 統計](assets/oracle-autotrace-before.png)
+![Oracle 改善前：全表掃描，邏輯讀取量為 97,601](assets/oracle-autotrace-before.png)
 
-### 調校後：Index Range Scan
+### 改善後：利用索引縮小查找範圍
 
-建立適當索引後，執行計畫改為 `INDEX RANGE SCAN` 搭配 `TABLE ACCESS BY INDEX ROWID BATCHED`；單次 Consistent Gets 降至 **368**，Physical Reads 為 **0**。
+圖中的 `INDEX RANGE SCAN` 代表利用索引查找；`consistent gets` 降至 **368**。
 
-![Oracle 調校後：索引範圍掃描與 Autotrace 統計](assets/oracle-autotrace-after.png)
+![Oracle 改善後：利用索引查找，邏輯讀取量降至 368](assets/oracle-autotrace-after.png)
 
-> 圖片擷取自原始調校紀錄，將同一次執行的執行計畫與統計區塊上下排版，省略查詢條件並遮蔽內部物件名稱及計畫雜湊值。保留原始存取方式與統計數字，未重繪或變更數據。結果為還原測試環境中的單次執行比較。
+## 專案價值
 
-## 使用技術
+此案例呈現我如何找出高頻率查詢造成的重複消耗，設計合適的資料查找方式，並在測試環境中以數據驗證改善方案。對於反覆執行的查詢，降低單次處理成本，有助於減少累積的資料庫負擔。
 
-Oracle Database、SQL、AWR、Oracle Enterprise Manager、Autotrace、執行計畫分析、索引設計、統計資訊。
+<details>
+<summary>技術補充：執行計畫與完整數據</summary>
 
-## 資料呈現說明
+| 效能指標 | 建立索引前 | 建立索引後 |
+| --- | ---: | ---: |
+| Consistent Gets | 97,601 | 368 |
+| Physical Reads | 94,247 | 0 |
+| Optimizer Cost | 25,589 | 11 |
 
-本頁依既有調校紀錄整理，省略內部系統名稱、Schema、資料表名稱、SQL ID、帳號值及聯絡資訊；原始內部郵件與 PDF 未納入公開儲存庫。
+執行計畫由 `TABLE ACCESS FULL` 改為 `INDEX RANGE SCAN` 搭配 `TABLE ACCESS BY INDEX ROWID BATCHED`。
+
+Consistent Gets 減幅以 `(97,601 - 368) / 97,601` 計算，約為 99.62%。Physical Reads 受快取狀態影響；Optimizer Cost 為最佳化器的估算成本，不代表實際執行時間。
+
+使用工具與方法：Oracle Database、AWR、Oracle Enterprise Manager、Autotrace、執行計畫分析、索引設計、統計資訊。
+
+</details>
+
+圖片保留原始執行計畫與統計數字，將同一次執行的兩個區塊上下排版，並省略查詢條件、遮蔽內部物件名稱及計畫雜湊值。原始內部郵件與 PDF 未公開。
